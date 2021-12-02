@@ -3,6 +3,7 @@ package wrapper
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"github.com/micro/micro/v3/util/opentelemetry"
 	"github.com/opentracing/opentracing-go"
 	"github.com/opentracing/opentracing-go/ext"
+	"github.com/opentracing/opentracing-go/log"
 )
 
 // OpenTraceHandler wraps a server handler to perform opentracing:
@@ -42,6 +44,10 @@ func OpenTraceHandler() server.HandlerWrapper {
 
 			// Start a span from context:
 			span, newCtx := opentracing.StartSpanFromContextWithTracer(ctx, opentelemetry.DefaultOpenTracer, operationName, opentracing.ChildOf(spanCtx), ext.SpanKindRPCServer)
+
+			r, _ := json.MarshalIndent(req.Body(), "", "  ")
+			span.LogFields(log.String("req", string(r)))
+
 			// TODO remove me
 			ext.SamplingPriority.Set(span, 1)
 			defer span.Finish()
@@ -51,6 +57,8 @@ func OpenTraceHandler() server.HandlerWrapper {
 				span.SetBaggageItem("error", err.Error())
 				return err
 			}
+			r, _ = json.MarshalIndent(rsp, "", "  ")
+			span.LogFields(log.String("rsp", string(r)))
 
 			return nil
 		}
