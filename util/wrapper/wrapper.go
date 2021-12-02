@@ -3,6 +3,7 @@ package wrapper
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"reflect"
 	"strings"
 	"time"
@@ -146,13 +147,22 @@ func LogClient(c client.Client) client.Client {
 	return &logWrapper{c}
 }
 
+func logBody(ctx context.Context, desc string, body interface{}) {
+	reqJSON, _ := json.Marshal(body)
+	traceID, sID, _ := trace.FromContext(ctx)
+	logger.Debugf("[req-%s span-%s] %s %s", traceID, sID, desc, reqJSON)
+}
+
 func LogHandler() server.HandlerWrapper {
 	// return a handler wrapper
 	return func(h server.HandlerFunc) server.HandlerFunc {
 		// return a function that returns a function
 		return func(ctx context.Context, req server.Request, rsp interface{}) error {
 			logger.Debugf("Serving request for service %s endpoint %s", req.Service(), req.Endpoint())
-			return h(ctx, req, rsp)
+			logBody(ctx, "handler request(in)", req.Body())
+			r := h(ctx, req, rsp)
+			logBody(ctx, "handler response(out)", rsp)
+			return r
 		}
 	}
 }
