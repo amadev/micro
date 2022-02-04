@@ -1,0 +1,85 @@
+include:
+  - project: 'xpate/x-infra'
+    ref: master
+    file: '/ci-templates/templates.yml'
+
+image: docker:20.10.10-git
+variables:
+  DOCKER_DRIVER: overlay2
+
+stages:
+  # - test
+  - build
+  - deploy
+
+# Run linter and tests for golang app
+# test_and_lint:
+#   extends: .go_lint_and_test
+#   only:
+#     - branches
+#     - tags
+#     - merge_requests
+
+# Build a docker image for app
+docker_build:
+  stage: build
+  variables:
+    CONTAINER_REGISTRY_NAME: registry.digitalocean.com
+    BUILD_ARGS: --opt build-arg:XPATE_GROUP_CI_TOKEN=$XPATE_GROUP_CI_TOKEN
+  services:
+    - docker:20.10.10-dind
+  script:
+    - apk add --no-cache bash
+    - echo -n ${CI_JOB_TOKEN} | docker login -u ${DOCKER_REGISTRY_TOKEN} -p ${DOCKER_REGISTRY_TOKEN} ${CONTAINER_REGISTRY_NAME}
+    - bash scripts/build.sh
+  rules:
+    - !reference [.default_rules, rules]
+    - if: '($CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH) && ($CI_PIPELINE_SOURCE != "merge_request_event")'
+      when: manual
+
+# Deploy to test k8s with Argo CD
+deploy_test:
+  variables:
+    CONTAINER_REGISTRY_NAME: registry.digitalocean.com
+    HELM_VALUES_FILE: values_test.yaml
+  needs: [docker_build]
+  stage: deploy
+  image: docker:20.10.10-git
+  before_script:
+    - eval `ssh-agent -s`
+    - echo "${X_INFRA_REPO_DEPLOY_KEY}" | tr -d '\r' | ssh-add - > /dev/null
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+    - ssh-keyscan gitlab.com >> ~/.ssh/known_hosts
+    - chmod 644 ~/.ssh/known_hosts
+    - git config --global user.email "${GITLAB_USER_EMAIL}"
+    - git config --global user.name "${GITLAB_USER_NAME}"
+    - apk add --no-cache bash make
+  script:
+    - bash scripts/deploy.sh
+  rules:
+    - if: '($CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH) && ($CI_PIPELINE_SOURCE != "merge_request_event")'
+      when: manual
+
+# Deploy to production k8s with Argo CD
+deploy_production:
+  variables:
+    CONTAINER_REGISTRY_NAME: registry.digitalocean.com
+    HELM_VALUES_FILE: values_production.yaml
+  needs: [docker_build]
+  stage: deploy
+  image: docker:20.10.10-git
+  before_script:
+    - eval `ssh-agent -s`
+    - echo "${X_INFRA_REPO_DEPLOY_KEY}" | tr -d '\r' | ssh-add - > /dev/null
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+    - ssh-keyscan gitlab.com >> ~/.ssh/known_hosts
+    - chmod 644 ~/.ssh/known_hosts
+    - git config --global user.email "${GITLAB_USER_EMAIL}"
+    - git config --global user.name "${GITLAB_USER_NAME}"
+    - apk add --no-cache bash make
+  script:
+    - bash scripts/deploy.sh
+  rules:
+    - !reference [.default_rules, rules]
